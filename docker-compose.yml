@@ -1,15 +1,25 @@
 version: "3.9"
 
+# --------------------------------------------------------------------------
+# VOLUMES
+# --------------------------------------------------------------------------
 volumes:
   n8n_storage:
   postgres_storage:
   ollama_storage:
   qdrant_storage:
+  minio_storage:
 
+# --------------------------------------------------------------------------
+# NETWORK
+# --------------------------------------------------------------------------
 networks:
   work-net:
     driver: bridge
 
+# --------------------------------------------------------------------------
+# SERVICE TEMPLATES
+# --------------------------------------------------------------------------
 x-n8n: &service-n8n
   image: n8nio/n8n:latest
   networks:
@@ -19,41 +29,52 @@ x-n8n: &service-n8n
     - DB_POSTGRESDB_HOST=postgres
     - DB_POSTGRESDB_USER=${POSTGRES_USER}
     - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+    - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
     - N8N_DIAGNOSTICS_ENABLED=false
     - N8N_PERSONALIZATION_ENABLED=false
     - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
     - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
-    - OLLAMA_HOST=http://ollama-cpu:11434
+    - OLLAMA_HOST=http://ollama:11434
 
 x-ollama: &service-ollama
   image: ollama/ollama:latest
-  container_name: ollama-cpu
   networks:
     - work-net
   restart: unless-stopped
   ports:
-    - 11434:11434
+    - "11434:11434"
   volumes:
     - ollama_storage:/root/.ollama
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:11434"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
 
 x-init-ollama: &init-ollama
   image: ollama/ollama:latest
   networks:
     - work-net
-  container_name: ollama-pull-llama-cpu
   volumes:
     - ollama_storage:/root/.ollama
   entrypoint: /bin/sh
   environment:
-    - OLLAMA_HOST=ollama-cpu:11434
+    - OLLAMA_HOST=ollama:11434
   command:
     - "-c"
-    - "sleep 3; ollama pull llama3.2"
+    - "until curl -s http://ollama:11434 >/dev/null; do sleep 1; done; ollama pull llama3.2"
 
+# --------------------------------------------------------------------------
+# SERVICES
+# --------------------------------------------------------------------------
 services:
+  # ---------------------
+  # POSTGRES
+  # ---------------------
   postgres:
     image: postgres:16-alpine
     hostname: postgres
+    container_name: postgres
     networks:
       - work-net
     restart: unless-stopped
@@ -64,11 +85,37 @@ services:
     volumes:
       - postgres_storage:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
+  # ---------------------
+  # MAIN N8N SERVICE
+  # ---------------------
+  n8n:
+    <<: *service-n8n
+    hostname: n8n
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_storage:/home/node/.n8n
+      - /volume1/work/n8n/backup:/backup
+      - /volume1/work/shared:/data/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5678/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  # ---------------------
+  # N8N IMPORT SERVICE
+  # ---------------------
   n8n-import:
     <<: *service-n8n
     hostname: n8n-import
@@ -82,24 +129,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-
-  n8n:
-    <<: *service-n8n
-    hostname: n8n
-    container_name: n8n
-    restart: unless-stopped
-    ports:
-      - 5678:5678
-    volumes:
-      - n8n_storage:/home/node/.n8n
-      - /volume1/work/n8n/backup:/backup
-      - /volume1/work/shared:/data/shared
-    depends_on:
-      postgres:
+      n8n:
         condition: service_healthy
-      n8n-import:
-        condition: service_completed_successfully
 
+  # ---------------------
+  # QDRANT (Vector DB)
+  # ---------------------
   qdrant:
     image: qdrant/qdrant:latest
     hostname: qdrant
@@ -108,39 +143,20 @@ services:
       - work-net
     restart: unless-stopped
     ports:
-      - 6333:6333
+      - "6333:6333"
     volumes:
       - qdrant_storage:/qdrant/storage
 
-  # Removed GPU/AMD bloatware (not needed for CPU-only NAS)
-  # ollama-gpu:
-  #   profiles: ["gpu-nvidia"]
-  #   <<: *service-ollama
-  #   deploy:
-  #     resources:
-  #       reservations:
-  #         devices:
-  #           - driver: nvidia
-  #             count: 1
-  #             capabilities: [gpu]
+  # ---------------------
+  # OLLAMA (CPU-ONLY)
+  # ---------------------
+  ollama:
+    <<: *service-ollama
+    container_name: ollama
 
-  # ollama-gpu-amd:
-  #   profiles: ["gpu-amd"]
-  #   <<: *service-ollama
-  #   image: ollama/ollama:rocm
-  #   devices:
-  #     - "/dev/kfd"
-  #     - "/dev/dri"
-
-  # ollama-pull-llama-gpu:
-  #   profiles: ["gpu-nvidia"]
-  #   <<: *init-ollama
-  #   depends_on:
-  #     - ollama-gpu
-
-  # ollama-pull-llama-gpu-amd:
-  #   profiles: [gpu-amd]
-  #   <<: *init-ollama
-  #   image: ollama/ollama:rocm
-  #   depends_on:
-  #    - ollama-gpu-amd
+  ollama-pull-llama:
+    <<: *init-ollama
+    container_name: ollama-pull-llama
+    depends_on:
+      ollama:
+        condition: service_healthy
