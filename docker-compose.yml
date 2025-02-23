@@ -119,48 +119,29 @@ services:
     <<: *init-ollama
     depends_on:
       - ollama-cpu
+# minio:
+#   image: minio/minio
+#   container_name: minio
+#   restart: unless-stopped
+#   networks:
+#     - work-net
+#   volumes:
+#     - /volume1/work/minio:/data
+#   environment:
+#     - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+#     - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+#   command: server --console-address ":9001" /data
+#   ports:
+#     - "9000:9000"
+#     - "9001:9001"
 
-  nextcloud:
-    image: nextcloud
-    container_name: nextcloud
-    restart: unless-stopped
-    networks:
-      - work-net
-    volumes:
-      - /volume1/work/nextcloud:/var/www/html
-    environment:
-      - MYSQL_HOST=postgres
-      - MYSQL_PASSWORD=${POSTGRES_PASSWORD}
-      - MYSQL_USER=nextcloud
-      - MYSQL_DATABASE=nextcloud
-    depends_on:
-      - postgres
-    ports:
-      - "8080:80"
-
-  minio:
-    image: minio/minio
-    container_name: minio
-    restart: unless-stopped
-    networks:
-      - work-net
-    volumes:
-      - /volume1/work/minio:/data
-    environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-    command: server --console-address ":9001" /data
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-
-  jupyter:
-    image: jupyter/datascience-notebook
-    container_name: jupyter
-    restart: unless-stopped
-    networks:
-      - work-net
-    volumes:
-      - /volume1/work/jupyter:/home/jovyan/work
-    ports:
-      - "8888:8888"
+# jupyter:
+#   image: jupyter/datascience-notebook
+#   container_name: jupyter
+#   restart: unless-stopped
+#   networks:
+#     - work-net
+#   volumes:
+#     - /volume1/work/jupyter:/home/jovyan/work
+#   ports:
+#     - "8888:8888"
