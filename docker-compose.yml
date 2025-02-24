@@ -7,8 +7,8 @@ volumes:
   qdrant_storage:
 
 networks:
-  work-net:
-    external: true
+#  work-net:
+#    external: true # Uses an existing network and sets it as static
 
 x-n8n-environment: &service-n8n-environment
   DB_TYPE: postgresdb
